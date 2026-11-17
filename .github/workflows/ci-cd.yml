@@ -1,0 +1,101 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  # ---------- Stage 1: BUILD & TEST (GitHub + npm) ----------
+  build-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Run automated tests
+        run: npm test
+
+  # ---------- Stage 2: DOCKER (test the stack, then build and push the image) ----------
+  docker:
+    needs: build-test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Start the Compose stack (web + database) and check it
+        run: |
+          docker compose up -d --build
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost:3000/health/db; then echo; echo "Stack is healthy"; exit 0; fi
+            sleep 3
+          done
+          docker compose logs
+          exit 1
+
+      - name: Log in to GitHub Container Registry
+        if: github.event_name == 'push'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Work out the image name (must be lowercase)
+        run: echo "IMAGE_NAME=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - name: Build and push the image
+        if: github.event_name == 'push'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE_NAME }}:latest
+            ${{ env.IMAGE_NAME }}:${{ github.sha }}
+
+  # ---------- Stage 3: DEPLOY (only on push to main) ----------
+  # Pulls the image that was just pushed and runs it with the production Compose file,
+  # then checks the deployed app answers. No server needed.
+  deploy:
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Deploy with docker-compose.prod.yml and verify
+        run: |
+          export IMAGE="ghcr.io/${GITHUB_REPOSITORY,,}:${GITHUB_SHA}"
+          docker compose -f docker-compose.prod.yml pull
+          docker compose -f docker-compose.prod.yml up -d
+          for i in $(seq 1 20); do
+            if curl -sf http://localhost/health/db; then
+              echo; echo "Deployment verified"
+              docker compose -f docker-compose.prod.yml ps
+              exit 0
+            fi
+            sleep 3
+          done
+          docker compose -f docker-compose.prod.yml logs
+          exit 1

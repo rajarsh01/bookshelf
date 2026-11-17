@@ -1,0 +1,33 @@
+# Local run: builds the web image from the Dockerfile and starts web + database together.
+services:
+  web:
+    build: .
+    ports:
+      - "3000:3000"
+    environment:
+      DB_HOST: db                              # "db" is the database service name below
+      DB_USER: ${DB_USER:-bookuser}
+      DB_PASSWORD: ${DB_PASSWORD:-bookpass}
+      DB_NAME: ${DB_NAME:-bookdb}
+    depends_on:
+      db:
+        condition: service_healthy             # start web only when PostgreSQL is ready
+    restart: unless-stopped
+
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: ${DB_USER:-bookuser}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-bookpass}
+      POSTGRES_DB: ${DB_NAME:-bookdb}
+    volumes:
+      - db_data:/var/lib/postgresql/data       # keeps your books when containers are removed
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-bookuser} -d ${DB_NAME:-bookdb}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  db_data:

@@ -1,0 +1,15 @@
+{
+  "name": "bookshelf",
+  "version": "1.0.0",
+  "description": "BookShelf: a reading-list web app (Node.js + PostgreSQL) run with Docker Compose and shipped by a GitHub Actions CI/CD pipeline",
+  "main": "src/server.js",
+  "scripts": {
+    "start": "node src/server.js",
+    "test": "node --test"
+  },
+  "license": "MIT",
+  "dependencies": {
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
+}

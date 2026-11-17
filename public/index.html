@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>BookShelf</title>
+  <style>
+    :root { --ink:#2b2118; --muted:#7a6a5a; --paper:#faf6ef; --card:#fffdf8; --line:#e6dccb; --accent:#8b4513; }
+    * { box-sizing: border-box; }
+    body { font-family: Georgia, "Times New Roman", serif; background: var(--paper); color: var(--ink); margin: 0; padding: 2.5rem 1rem; }
+    main { max-width: 620px; margin: 0 auto; }
+    h1 { font-size: 2rem; margin: 0 0 .2rem; }
+    .sub { color: var(--muted); margin: 0 0 1.5rem; font-style: italic; }
+    form { display: grid; grid-template-columns: 1fr 1fr auto; gap: .5rem; margin-bottom: 1.5rem; }
+    input { padding: .65rem .8rem; border: 1px solid var(--line); border-radius: 8px; font: inherit; background: var(--card); min-width: 0; }
+    button { font: inherit; cursor: pointer; border-radius: 8px; border: 0; padding: .65rem 1.1rem; background: var(--accent); color: #fff; }
+    ul { list-style: none; margin: 0; padding: 0; display: grid; gap: .6rem; }
+    li { display: flex; align-items: center; gap: .8rem; background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: .8rem 1rem; }
+    .info { flex: 1; min-width: 0; }
+    .title { font-weight: bold; }
+    .author { color: var(--muted); font-size: .92rem; }
+    select { font: inherit; font-size: .9rem; padding: .35rem .5rem; border-radius: 6px; border: 1px solid var(--line); background: #fff; }
+    li.finished .title { text-decoration: line-through; color: var(--muted); }
+    .del { background: transparent; color: #b42318; padding: .3rem .5rem; font-size: 1.2rem; line-height: 1; }
+    .empty { color: var(--muted); text-align: center; padding: 1.5rem 0; }
+    footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid var(--line); color: var(--muted); font: .85rem ui-monospace, Menlo, Consolas, monospace; }
+    .ok { color: #1a7f37; }
+    .bad { color: #b42318; }
+    @media (max-width: 520px) { form { grid-template-columns: 1fr; } }
+  </style>
+</head>
+<body>
+<main>
+  <h1>📚 BookShelf</h1>
+  <p class="sub">Your reading list, stored in PostgreSQL.</p>
+
+  <form id="form">
+    <input id="title" placeholder="Book title" maxlength="200" required>
+    <input id="author" placeholder="Author" maxlength="200" required>
+    <button>Add</button>
+  </form>
+
+  <ul id="list"></ul>
+
+  <footer id="info">Checking containers…</footer>
+</main>
+
+<script>
+  const list = document.getElementById("list");
+
+  async function load() {
+    const books = await (await fetch("/api/books")).json();
+    list.innerHTML = "";
+    if (books.length === 0) {
+      list.innerHTML = '<li class="empty" style="justify-content:center">No books yet. Add your first one above.</li>';
+    }
+    for (const b of books) {
+      const li = document.createElement("li");
+      li.className = b.status;
+
+      const info = document.createElement("div");
+      info.className = "info";
+      const title = document.createElement("div");
+      title.className = "title";
+      title.textContent = b.title;          // textContent keeps user input safe
+      const author = document.createElement("div");
+      author.className = "author";
+      author.textContent = "by " + b.author;
+      info.append(title, author);
+
+      const select = document.createElement("select");
+      for (const s of ["to-read", "reading", "finished"]) {
+        const opt = new Option(s, s, false, s === b.status);
+        select.add(opt);
+      }
+      select.onchange = async () => {
+        await fetch("/api/books/" + b.id, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: select.value }),
+        });
+        load();
+      };
+
+      const del = document.createElement("button");
+      del.className = "del";
+      del.title = "Delete";
+      del.textContent = "×";
+      del.onclick = async () => { await fetch("/api/books/" + b.id, { method: "DELETE" }); load(); };
+
+      li.append(info, select, del);
+      list.append(li);
+    }
+  }
+
+  async function loadInfo() {
+    const el = document.getElementById("info");
+    try {
+      const i = await (await fetch("/api/info")).json();
+      const cls = i.database === "connected" ? "ok" : "bad";
+      el.innerHTML = "web container: <b></b> · database: <span class='" + cls + "'>" + i.database + "</span>";
+      el.querySelector("b").textContent = i.container;
+    } catch (e) {
+      el.textContent = "web container unreachable";
+    }
+  }
+
+  document.getElementById("form").onsubmit = async (e) => {
+    e.preventDefault();
+    const t = document.getElementById("title");
+    const a = document.getElementById("author");
+    await fetch("/api/books", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title: t.value, author: a.value }),
+    });
+    t.value = ""; a.value = "";
+    load();
+  };
+
+  load();
+  loadInfo();
+</script>
+</body>
+</html>
